@@ -1,56 +1,27 @@
-# ngrams.py
+# mmlcs.py
 # Trevor Pottinger
 # Tue May 12 22:56:34 PDT 2015
 
 from __future__ import print_function
 
+# stdlib imports
 import argparse
 import glob
 import json
 import multiprocessing
 import os
+import struct
 import sys
 import time
 
+# local imports
+from extractors import (ngrams, substrings)
+from filefuncs import (simpleFunc, multiFunc)
+
 DEBUG = False
-ENABLE_MULTICORE = True
+ENABLE_MULTICORE = False
 NUM_CORES = multiprocessing.cpu_count()
 NGRAMS = 3
-
-def ngrams(data, n):
-  "Expects a bytestring and returns a histogram of ngrams"
-  assert n >= 0, 'n must be greater than zero: %d' % n
-  assert n < len(data), 'n must be less than len(data): %d > %d' % (n, len(data))
-  hist = {}
-  for i in xrange(len(data) - n + 1):
-    # I feel like this one line is why I use python..
-    gram = data[i : i + n]
-    if gram in hist:
-      hist[gram] += 1
-    else:
-      hist[gram] = 1
-  return hist
-
-def substrings(data, n, hist):
-  "Assumes hist is a bunch of ngrams"
-  subs = set()
-  i = 0
-  while i < len(data) - n + 1:
-    if data[i : i + n] in hist:
-      # select longest substring in hist
-      end = i + 1
-      for j in xrange(i + 1, len(data) - n + 1):
-        if data[j : j + n] in hist:
-          end += 1
-        else:
-          break
-      # TODO use a constant instead of 4
-      if end - i > 4:
-        subs.add(data[i : end])
-        i = end
-    # if only python had real for loops and this bug wouldn't have happened..
-    i += 1
-  return subs
 
 def sortedHist(hist, minT=0):
   "Actually returns a sorted list of (key, value) tuples"
@@ -74,14 +45,21 @@ def topKHist(tuples, k):
     ret[tuples[-i][0]] = tuples[-i][1]
   return ret
 
-def prettybytes(s):
+def bin2hex(s):
   return ''.join( ("%02x" % ord(c) for c in s) )
+
+def hex2bin(s):
+  binstr = ''
+  for i in range(0, len(s), 2):
+    # don't use += to be explicit about ordering
+    binstr = binstr + struct.pack('B', int(s[i:i+2], 16))
+  return binstr
 
 def prettyhist(hist):
   "Expects a histogram where the keys are bytestrings"
   ret = {}
   for gram in hist:
-    hexgram = prettybytes(gram)
+    hexgram = bin2hex(gram)
     ret[hexgram] = hist[gram]
   return ret
 
@@ -97,99 +75,17 @@ def percentiles(ns, k):
   ret.append(ns[-1])
   return ret
 
-def simpleNGramFun(filenames):
-  lens = []
-  count_distinct_ngrams = []
-  common_ngrams = {}
-  # TODO partition the problem size and use multiprocessing
-  for filename in filenames:
-    blob = open(filename).read()
-    # SLOW +1
-    hist = ngrams(blob, NGRAMS)
-    lens.append(len(blob))
-    count_distinct_ngrams.append(len(hist))
-    # SLOW +5
-    for k in hist:
-      if k in common_ngrams:
-        common_ngrams[k] += 1
-      else:
-        common_ngrams[k] = 1
-    if DEBUG:
-      print("%s %d %d" % (filename, len(blob), len(hist)))
-  return (lens, count_distinct_ngrams, common_ngrams)
-
-def multiNGramFun(filenames):
-  filename_partitions = []
-  partition_size = len(filenames) / NUM_CORES
-  for i in range(NUM_CORES):
-    filename_partitions.append(filenames[i*partition_size:(i+1)*partition_size])
-  pool = multiprocessing.Pool(NUM_CORES)
-  result_partitions = pool.map(simpleNGramFun, filename_partitions)
-  # not sure why these next two lines are necessary
-  pool.close()
-  pool.join()
-  # now to join all the results
-  lens = []
-  count_distinct_ngrams = []
-  common_ngrams = {}
-  for i in range(NUM_CORES):
-    lens.extend(result_partitions[i][0])
-    count_distinct_ngrams.extend(result_partitions[i][1])
-    partial_common_ngrams = result_partitions[i][2]
-    # SLOW +5
-    for k in partial_common_ngrams:
-      if k in common_ngrams:
-        common_ngrams[k] += partial_common_ngrams[k]
-      else:
-        common_ngrams[k] = partial_common_ngrams[k]
-  return (lens, count_distinct_ngrams, common_ngrams)
-
-def simpleSubstringsFun(args):
-  """Approximates longest common substring by extracting substrings that are
-  composed of several ngrams that occured in many distinct file contents"""
-  filenames = args[0]
-  ngram_set = args[1]
-  common_substrings = {}
-  for filename in filenames:
-    blob = open(filename).read()
-    subs = substrings(blob, NGRAMS, ngram_set)
-    for sub in subs:
-      if sub in common_substrings:
-        common_substrings[sub] += 1
-      else:
-        common_substrings[sub] = 1
-  return common_substrings
-
-def multiSubstringsFun(args):
-  filenames = args[0]
-  ngram_set = args[1]
-  filename_partitions = []
-  partition_size = len(filenames) / NUM_CORES
-  for i in range(NUM_CORES):
-    filename_partitions.append((filenames[i*partition_size:(i+1)*partition_size], ngram_set))
-  pool = multiprocessing.Pool(NUM_CORES)
-  result_partitions = pool.map(simpleSubstringsFun, filename_partitions)
-  # not sure why these next two lines are necessary
-  pool.close()
-  pool.join()
-  # now join the results
-  common_substrings = {}
-  for i in range(NUM_CORES):
-    partial_common_substrings = result_partitions[i]
-    for k in partial_common_substrings:
-      if k in common_substrings:
-        common_substrings[k] += partial_common_substrings[k]
-      else:
-        common_substrings[k] = partial_common_substrings[k]
-  return common_substrings
-
 def main(path_regex, outfile, outformat):
   start = time.time()
   filenames = glob.glob(path_regex)
   if not ENABLE_MULTICORE:
-    (lens, count_distinct_ngrams, common_ngrams) = simpleNGramFun(filenames)
+    (lens, count_distinct_ngrams, common_ngrams) = simpleFunc(
+      (filenames, ngrams, [NGRAMS])
+    )
   else:
-    (lens, count_distinct_ngrams, common_ngrams) = multiNGramFun(filenames)
+    (lens, count_distinct_ngrams, common_ngrams) = multiFunc(
+      (filenames, ngrams, [NGRAMS])
+    )
   now = time.time()
   print("[+] Reading %d files complete; time elapsed: %1.3f" % (len(lens), now - start))
   start = now
@@ -205,8 +101,8 @@ def main(path_regex, outfile, outformat):
   # these next three are really just for pretty printing
   # begin can this be removed?
   sorted_duplicated_common_ngrams = filter(lambda kvtuple: kvtuple[1] > 1, sorted_common_ngrams)
-  pretty_common_ngrams = map(lambda kvtuple: (prettybytes(kvtuple[0]), kvtuple[1]), sorted_common_ngrams)
-  pretty_duplicated_ngrams = map(lambda kvtuple: (prettybytes(kvtuple[0]), kvtuple[1]), sorted_duplicated_common_ngrams)
+  pretty_common_ngrams = map(lambda kvtuple: (bin2hex(kvtuple[0]), kvtuple[1]), sorted_common_ngrams)
+  pretty_duplicated_ngrams = map(lambda kvtuple: (bin2hex(kvtuple[0]), kvtuple[1]), sorted_duplicated_common_ngrams)
   now = time.time()
   print("[+] Sorting distinct ngrams complete; time elapsed: %1.3f" % (now - start))
   start = now
@@ -214,10 +110,14 @@ def main(path_regex, outfile, outformat):
   # TODO how do we pick 30?
   top_common_ngram_set = set(map(lambda kvtuple: kvtuple[0], filter(lambda kvtuple: kvtuple[1] > 30, sorted_common_ngrams)))
   if not ENABLE_MULTICORE:
-    # SLOW +1
-    common_substrings = simpleSubstringsFun((filenames, top_common_ngram_set))
+    # RFC we're ignoring the count of distinct substrings
+    (_, _, common_substrings) = simpleFunc(
+      (filenames, substrings, [NGRAMS, top_common_ngram_set])
+    )
   else:
-    common_substrings = multiSubstringsFun((filenames, top_common_ngram_set))
+    (_, _, common_substrings) = multiFunc(
+      (filenames, substrings, [NGRAMS, top_common_ngram_set])
+    )
   now = time.time()
   print("[+] Extracting %d substrings complete; time elapsed: %1.3f" % (len(common_substrings), now - start))
   start = now
@@ -228,8 +128,8 @@ def main(path_regex, outfile, outformat):
   else:
     sorted_common_substrings = sortedHist(common_substrings, 1)
   # TODO don't take the first 40 bytes...
-  pretty_common_substrings = map(lambda kvtuple: (prettybytes(kvtuple[0][:40]), kvtuple[1]), sorted_common_substrings)
-  pretty_common_substrings_raw = map(lambda kvtuple: (prettybytes(kvtuple[0]), kvtuple[1]), sorted_common_substrings)
+  pretty_common_substrings = map(lambda kvtuple: (bin2hex(kvtuple[0][:40]), kvtuple[1]), sorted_common_substrings)
+  pretty_common_substrings_raw = map(lambda kvtuple: (bin2hex(kvtuple[0]), kvtuple[1]), sorted_common_substrings)
   substring_lens = map(lambda kvtuple: len(kvtuple[0]), sorted_common_substrings)
   substring_lens.sort(reverse=True)
   now = time.time()
