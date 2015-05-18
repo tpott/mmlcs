@@ -22,7 +22,7 @@ from sorting import (mergeSort, multiMergeSort)
 DEBUG = False
 ENABLE_MULTICORE = True
 NUM_CORES = multiprocessing.cpu_count()
-NGRAMS = 3
+NGRAMS_DEFAULT = 3
 
 def __hist_cmp(x, y):
   if x[1] > y[1]:
@@ -32,6 +32,21 @@ def __hist_cmp(x, y):
   else:
     return 0
 
+def __substr_hist_cmp(x, y):
+  # how many occurances
+  if x[1] > y[1]:
+    return 1
+  elif x[1] < y[1]:
+    return -1
+  else:
+    # length of substrs
+    if len(x[0]) > len(y[0]):
+      return 1
+    elif len(x[0]) < len(y[0]):
+      return -1
+    else:
+      return 0
+
 def sortedHist(hist, minT=0):
   "Actually returns a sorted list of (key, value) tuples"
   tuples = hist.items()
@@ -39,6 +54,13 @@ def sortedHist(hist, minT=0):
     tuples = filter(lambda kvtuple: kvtuple[1] > minT, tuples)
   # True implies reverse=True, aka DESCENDING
   return mergeSort(tuples, __hist_cmp, True)
+
+def sortedSubstrHist(hist, minT=0):
+  tuples = hist.items()
+  if minT > 0:
+    tuples = filter(lambda kvtuple: kvtuple[1] > minT, tuples)
+  # True implies reverse=True, aka DESCENDING
+  return mergeSort(tuples, __substr_hist_cmp, True)
 
 def multiSortedHist(hist, minT=0):
   "This seems to be memory bound :("
@@ -85,16 +107,21 @@ def percentiles(ns, k):
   ret.append(ns[-1])
   return ret
 
-def main(path_regex, outfile, outformat, use_multi, verbosity):
+def main(path_regex, outfile, outformat, use_multi, N, verbosity):
   start = time.time()
   filenames = glob.glob(path_regex)
+  print("Running mmlcs on %d files using %d cores looking for %d-grams" % (
+    len(filenames),
+    NUM_CORES if use_multi else 1,
+    N
+  ))
   if not use_multi:
     (lens, count_distinct_ngrams, common_ngrams) = simpleFunc(
-      (filenames, ngrams, [NGRAMS])
+      (filenames, ngrams, [N])
     )
   else:
     (lens, count_distinct_ngrams, common_ngrams) = multiFunc(
-      (filenames, ngrams, [NGRAMS])
+      (filenames, ngrams, [N])
     )
   now = time.time()
   print("[+] Reading %d files complete; time elapsed: %1.3f" % (len(lens), now - start))
@@ -121,21 +148,23 @@ def main(path_regex, outfile, outformat, use_multi, verbosity):
   if not use_multi:
     # RFC we're ignoring the count of distinct substrings
     (_, _, common_substrings) = simpleFunc(
-      (filenames, substrings, [NGRAMS, top_common_ngram_set])
+      (filenames, substrings, [N, top_common_ngram_set])
     )
   else:
     (_, _, common_substrings) = multiFunc(
-      (filenames, substrings, [NGRAMS, top_common_ngram_set])
+      (filenames, substrings, [N, top_common_ngram_set])
     )
   now = time.time()
   print("[+] Extracting %d substrings complete; time elapsed: %1.3f" % (len(common_substrings), now - start))
   start = now
   if not use_multi or True:
+    print("[-] WARNING: n=2 for the following function sometimes resulted in []")
     # This shouldn't be too slow since its sample size is much smaller than above
     # Note that this returns a list of (substring, count) tuples
-    sorted_common_substrings = sortedHist(common_substrings, 1)
+    sorted_common_substrings = sortedSubstrHist(common_substrings, 1)
   else:
-    sorted_common_substrings = multiSortedHist(common_substrings, 1)
+    # TODO
+    sorted_common_substrings = sortedSubstrHist(common_substrings, 1)
   # TODO don't take the first 40 bytes...
   pretty_common_substrings = map(lambda kvtuple: (bin2hex(kvtuple[0][:40]), kvtuple[1]), sorted_common_substrings)
   pretty_common_substrings_raw = map(lambda kvtuple: (bin2hex(kvtuple[0]), kvtuple[1]), sorted_common_substrings)
@@ -151,7 +180,8 @@ def main(path_regex, outfile, outformat, use_multi, verbosity):
       print("[+] Writing output to %s" % (outfile))
       f.write("%s\n" % pretty_common_substrings_raw)
     elif outformat == 'tsv':
-      print('TSV output format not yet implemeneted')
+      for kvtuple in pretty_common_substrings_raw:
+        f.write("%s\t%s\n" % (kvtuple[0], kvtuple[1]))
     else:
       print("Unknown output format %s" % outformat)
     f.close()
@@ -184,8 +214,8 @@ def validateInput(args):
     output = None
   else:
     # TODO verify output file is writable
-    print("[-] WARNING: Don't know what to do with %s, assuming None" % args.output)
-    output = None
+    print("[-] WARNING: Don't know what to do with %s, #doitlive" % args.output)
+    output = args.output
   # output format
   if args.format is None:
     output_format = 'json'
@@ -202,7 +232,11 @@ def validateInput(args):
   else:
     # action='count' implies the value will be an integer
     verbosity = args.verbose
-  return (input_dir, output, output_format, args.multi, verbosity)
+  if args.n is None:
+    N = NGRAMS_DEFAULT
+  else:
+    N = args.n
+  return (input_dir, output, output_format, args.multi, N, verbosity)
 
 if __name__ == '__main__':
   # TODO argparse
@@ -225,8 +259,9 @@ if __name__ == '__main__':
     action='store_true',
     help='Toggles whether or not to use multiple cores'
   )
+  parser.add_argument('-n', help='The value of n for n-grams', type=int)
   parser.add_argument('-v', '--verbose', action='count')
-  (input_dir_regex, output, outformat, use_multi, verbosity) = validateInput(
+  (input_dir_regex, output, outformat, use_multi, n, verbosity) = validateInput(
     parser.parse_args()
   )
-  main(input_dir_regex, output, outformat, use_multi, verbosity)
+  main(input_dir_regex, output, outformat, use_multi, n, verbosity)
