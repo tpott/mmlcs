@@ -17,26 +17,36 @@ import time
 # local imports
 from extractors import (ngrams, substrings)
 from filefuncs import (simpleFunc, multiFunc)
+from sorting import (mergeSort, multiMergeSort)
 
 DEBUG = False
-ENABLE_MULTICORE = False
+ENABLE_MULTICORE = True
 NUM_CORES = multiprocessing.cpu_count()
 NGRAMS = 3
+
+def __hist_cmp(x, y):
+  if x[1] > y[1]:
+    return 1
+  elif x[1] < y[1]:
+    return -1
+  else:
+    return 0
 
 def sortedHist(hist, minT=0):
   "Actually returns a sorted list of (key, value) tuples"
   tuples = hist.items()
   if minT > 0:
     tuples = filter(lambda kvtuple: kvtuple[1] > minT, tuples)
-  def __cmp(x, y):
-    if x[1] > y[1]:
-      return 1
-    elif x[1] < y[1]:
-      return -1
-    else:
-      return 0
-  tuples.sort(__cmp, reverse=True)
-  return tuples
+  # True implies reverse=True, aka DESCENDING
+  return mergeSort(tuples, __hist_cmp, True)
+
+def multiSortedHist(hist, minT=0):
+  "This seems to be memory bound :("
+  tuples = hist.items()
+  if minT > 0:
+    tuples = filter(lambda kvtuple: kvtuple[1] > minT, tuples)
+  # True implies reverse=True, aka DESCENDING
+  return multiMergeSort(tuples, __hist_cmp, True)
 
 def topKHist(tuples, k):
   "Expects tuples to be sorted (key, value) tuples, lowest first"
@@ -75,10 +85,10 @@ def percentiles(ns, k):
   ret.append(ns[-1])
   return ret
 
-def main(path_regex, outfile, outformat):
+def main(path_regex, outfile, outformat, use_multi, verbosity):
   start = time.time()
   filenames = glob.glob(path_regex)
-  if not ENABLE_MULTICORE:
+  if not use_multi:
     (lens, count_distinct_ngrams, common_ngrams) = simpleFunc(
       (filenames, ngrams, [NGRAMS])
     )
@@ -92,12 +102,11 @@ def main(path_regex, outfile, outformat):
   # not slow because their len is the number of samples
   lens.sort(reverse=True)
   count_distinct_ngrams.sort(reverse=True)
-  if not ENABLE_MULTICORE:
+  if not use_multi or True:
     # SLOW +1 because common_ngrams gets huge
     sorted_common_ngrams = sortedHist(common_ngrams)
   else:
-    # TODO multi core sort
-    sorted_common_ngrams = sortedHist(common_ngrams)
+    sorted_common_ngrams = multiSortedHist(common_ngrams)
   # these next three are really just for pretty printing
   # begin can this be removed?
   sorted_duplicated_common_ngrams = filter(lambda kvtuple: kvtuple[1] > 1, sorted_common_ngrams)
@@ -109,7 +118,7 @@ def main(path_regex, outfile, outformat):
   # end can this be removed?
   # TODO how do we pick 30?
   top_common_ngram_set = set(map(lambda kvtuple: kvtuple[0], filter(lambda kvtuple: kvtuple[1] > 30, sorted_common_ngrams)))
-  if not ENABLE_MULTICORE:
+  if not use_multi:
     # RFC we're ignoring the count of distinct substrings
     (_, _, common_substrings) = simpleFunc(
       (filenames, substrings, [NGRAMS, top_common_ngram_set])
@@ -121,12 +130,12 @@ def main(path_regex, outfile, outformat):
   now = time.time()
   print("[+] Extracting %d substrings complete; time elapsed: %1.3f" % (len(common_substrings), now - start))
   start = now
-  if not ENABLE_MULTICORE:
+  if not use_multi or True:
     # This shouldn't be too slow since its sample size is much smaller than above
     # Note that this returns a list of (substring, count) tuples
     sorted_common_substrings = sortedHist(common_substrings, 1)
   else:
-    sorted_common_substrings = sortedHist(common_substrings, 1)
+    sorted_common_substrings = multiSortedHist(common_substrings, 1)
   # TODO don't take the first 40 bytes...
   pretty_common_substrings = map(lambda kvtuple: (bin2hex(kvtuple[0][:40]), kvtuple[1]), sorted_common_substrings)
   pretty_common_substrings_raw = map(lambda kvtuple: (bin2hex(kvtuple[0]), kvtuple[1]), sorted_common_substrings)
@@ -187,7 +196,13 @@ def validateInput(args):
   else:
     print("[-] WARNING: Unknown output format %s, assuming json" % args.format)
     output_format = 'json'
-  return (input_dir, output, output_format)
+  # verbosity
+  if args.verbose is None:
+    verbosity = 0
+  else:
+    # action='count' implies the value will be an integer
+    verbosity = args.verbose
+  return (input_dir, output, output_format, args.multi, verbosity)
 
 if __name__ == '__main__':
   # TODO argparse
@@ -204,5 +219,14 @@ if __name__ == '__main__':
     '--format',
     help='How the output should be formated. TSV or JSON'
   )
-  (input_dir_regex, output, outformat) = validateInput(parser.parse_args())
-  main(input_dir_regex, output, outformat)
+  parser.add_argument(
+    '-m',
+    '--multi',
+    action='store_true',
+    help='Toggles whether or not to use multiple cores'
+  )
+  parser.add_argument('-v', '--verbose', action='count')
+  (input_dir_regex, output, outformat, use_multi, verbosity) = validateInput(
+    parser.parse_args()
+  )
+  main(input_dir_regex, output, outformat, use_multi, verbosity)
