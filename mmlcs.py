@@ -158,7 +158,8 @@ def main(path_regex, outfile, outformat, use_multi, N, verbosity):
   print("[+] Extracting %d substrings complete; time elapsed: %1.3f" % (len(common_substrings), now - start))
   start = now
   if not use_multi or True:
-    print("[-] WARNING: n=2 for the following function sometimes resulted in []")
+    if N == 2:
+      print("[-] WARNING: n=2 for the following function sometimes resulted in []")
     # This shouldn't be too slow since its sample size is much smaller than above
     # Note that this returns a list of (substring, count) tuples
     sorted_common_substrings = sortedSubstrHist(common_substrings, 1)

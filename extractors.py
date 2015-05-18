@@ -29,6 +29,8 @@ def substrings(data, n, hist):
       # select longest substring in hist
       end = i + 1
       for j in xrange(i + 1, len(data) - n + 1):
+        # RFC how should we handle changes in the hist value, aka count for
+        #  that ngram? increases are interesting, decreases are unhelpful(?)
         if data[j : j + n] in hist:
           end += 1
         else:
