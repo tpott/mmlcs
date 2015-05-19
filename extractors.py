@@ -25,18 +25,21 @@ def substrings(data, n, hist):
   subs = {}
   i = 0
   while i < len(data) - n + 1:
-    if data[i : i + n] in hist:
+    gram = data[i : i + n]
+    if gram in hist:
       # select longest substring in hist
       end = i + 1
+      count = hist[gram]
       for j in xrange(i + 1, len(data) - n + 1):
+        jgram = data[j : j +n]
         # RFC how should we handle changes in the hist value, aka count for
         #  that ngram? increases are interesting, decreases are unhelpful(?)
-        if data[j : j + n] in hist:
+        if jgram in hist and hist[jgram] == count:
           end += 1
         else:
           break
-      # TODO use a constant instead of 4
-      if end - i > 4:
+      # TODO use a constant instead of 4?
+      if end - i >= 4:
         sub = data[i : end]
         if sub in subs:
           subs[sub] += 1

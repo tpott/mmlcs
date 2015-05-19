@@ -71,13 +71,6 @@ def multiSortedHist(hist, minT=0):
   # True implies reverse=True, aka DESCENDING
   return multiMergeSort(tuples, __hist_cmp, True)
 
-def topKHist(tuples, k):
-  "Expects tuples to be sorted (key, value) tuples, lowest first"
-  ret = {}
-  for i in range(k):
-    ret[tuples[-i][0]] = tuples[-i][1]
-  return ret
-
 def bin2hex(s):
   return ''.join( ("%02x" % ord(c) for c in s) )
 
@@ -87,26 +80,6 @@ def hex2bin(s):
     # don't use += to be explicit about ordering
     binstr = binstr + struct.pack('B', int(s[i:i+2], 16))
   return binstr
-
-def prettyhist(hist):
-  "Expects a histogram where the keys are bytestrings"
-  ret = {}
-  for gram in hist:
-    hexgram = bin2hex(gram)
-    ret[hexgram] = hist[gram]
-  return ret
-
-def percentiles(ns, k):
-  "Expects a list of integers and the number of percentiles"
-  assert len(ns) > k, 'There must be more integers than k: %d <= %d' % (len(ns), k)
-  # TODO expects ns to be sorted
-  ret = []
-  # TODO len(ns) / k is not the correct step size
-  # I'd expect len(ret) == k + 1, but it's not
-  for i in range(0, len(ns), len(ns) / k):
-    ret.append(ns[i])
-  ret.append(ns[-1])
-  return ret
 
 def main(path_regex, outfile, outformat, use_multi, N, verbosity):
   start = time.time()
@@ -141,25 +114,19 @@ def main(path_regex, outfile, outformat, use_multi, N, verbosity):
   start = now
   # RFC does top 25% make sense?
   top_k_index = len(sorted_common_ngrams) / 4
-  top_common_ngram_set = set(map(
-    lambda kvtuple: kvtuple[0],
-    sorted_common_ngrams[:top_k_index]
-  ))
   if not use_multi:
     # RFC we're ignoring the count of distinct substrings
     (_, _, common_substrings) = simpleFunc(
-      (filenames, substrings, [N, top_common_ngram_set])
+      (filenames, substrings, [N, dict(sorted_common_ngrams[:top_k_index])])
     )
   else:
     (_, _, common_substrings) = multiFunc(
-      (filenames, substrings, [N, top_common_ngram_set])
+      (filenames, substrings, [N, dict(sorted_common_ngrams[:top_k_index])])
     )
   now = time.time()
   print("[+] Extracting %d substrings complete; time elapsed: %1.3f" % (len(common_substrings), now - start))
   start = now
   if not use_multi or True:
-    if N == 2:
-      print("[-] WARNING: n=2 for the following function sometimes resulted in []")
     # This shouldn't be too slow since its sample size is much smaller than above
     # Note that this returns a sorted list of (substring, count) tuples
     sorted_common_substrings = sortedSubstrHist(common_substrings, 1)
@@ -181,7 +148,7 @@ def main(path_regex, outfile, outformat, use_multi, N, verbosity):
         f.write("%s\n" % pretty_common_substrings_raw)
       elif outformat == 'tsv':
         for kvtuple in pretty_common_substrings_raw:
-          f.write("%s\t%s\n" % (kvtuple[0], kvtuple[1]))
+          f.write("%s\t%s\n" % (str(kvtuple[1]), kvtuple[0]))
       else:
         print("Unknown output format %s" % outformat)
   else:
