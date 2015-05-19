@@ -23,6 +23,7 @@ DEBUG = False
 ENABLE_MULTICORE = True
 NUM_CORES = multiprocessing.cpu_count()
 NGRAMS_DEFAULT = 3
+OUTPUT_FORMAT_DEFAULT = 'tsv'
 
 def __hist_cmp(x, y):
   if x[1] > y[1]:
@@ -115,36 +116,35 @@ def main(path_regex, outfile, outformat, use_multi, N, verbosity):
     NUM_CORES if use_multi else 1,
     N
   ))
+  # TODO we could probably select a set instead of a histogram per file
   if not use_multi:
-    (lens, count_distinct_ngrams, common_ngrams) = simpleFunc(
+    (_, _, common_ngrams) = simpleFunc(
       (filenames, ngrams, [N])
     )
   else:
-    (lens, count_distinct_ngrams, common_ngrams) = multiFunc(
+    (_, _, common_ngrams) = multiFunc(
       (filenames, ngrams, [N])
     )
   now = time.time()
-  print("[+] Reading %d files complete; time elapsed: %1.3f" % (len(lens), now - start))
+  print("[+] Reading %d files complete; time elapsed: %1.3f" % (len(filenames), now - start))
   start = now
-  # not slow because their len is the number of samples
-  lens.sort(reverse=True)
-  count_distinct_ngrams.sort(reverse=True)
+  # note that the following functions currently take a histogram and return
+  #  a sorted list of (ngram, count) tuples
   if not use_multi or True:
-    # SLOW +1 because common_ngrams gets huge
-    sorted_common_ngrams = sortedHist(common_ngrams)
+    # SLOW because common_ngrams gets huge
+    sorted_common_ngrams = sortedHist(common_ngrams, 1)
   else:
-    sorted_common_ngrams = multiSortedHist(common_ngrams)
-  # these next three are really just for pretty printing
-  # begin can this be removed?
-  sorted_duplicated_common_ngrams = filter(lambda kvtuple: kvtuple[1] > 1, sorted_common_ngrams)
-  pretty_common_ngrams = map(lambda kvtuple: (bin2hex(kvtuple[0]), kvtuple[1]), sorted_common_ngrams)
-  pretty_duplicated_ngrams = map(lambda kvtuple: (bin2hex(kvtuple[0]), kvtuple[1]), sorted_duplicated_common_ngrams)
+    # multi core sorting doesn't work yet...
+    sorted_common_ngrams = multiSortedHist(common_ngrams, 1)
   now = time.time()
-  print("[+] Sorting distinct ngrams complete; time elapsed: %1.3f" % (now - start))
+  print("[+] Sorting %d ngrams complete; time elapsed: %1.3f" % (len(sorted_common_ngrams), now - start))
   start = now
-  # end can this be removed?
-  # TODO how do we pick 30?
-  top_common_ngram_set = set(map(lambda kvtuple: kvtuple[0], filter(lambda kvtuple: kvtuple[1] > 30, sorted_common_ngrams)))
+  # RFC does top 25% make sense?
+  top_k_index = len(sorted_common_ngrams) / 4
+  top_common_ngram_set = set(map(
+    lambda kvtuple: kvtuple[0],
+    sorted_common_ngrams[:top_k_index]
+  ))
   if not use_multi:
     # RFC we're ignoring the count of distinct substrings
     (_, _, common_substrings) = simpleFunc(
@@ -161,42 +161,38 @@ def main(path_regex, outfile, outformat, use_multi, N, verbosity):
     if N == 2:
       print("[-] WARNING: n=2 for the following function sometimes resulted in []")
     # This shouldn't be too slow since its sample size is much smaller than above
-    # Note that this returns a list of (substring, count) tuples
+    # Note that this returns a sorted list of (substring, count) tuples
     sorted_common_substrings = sortedSubstrHist(common_substrings, 1)
   else:
-    # TODO
+    # TODO multicore substr sorting
     sorted_common_substrings = sortedSubstrHist(common_substrings, 1)
-  # TODO don't take the first 40 bytes...
-  pretty_common_substrings = map(lambda kvtuple: (bin2hex(kvtuple[0][:40]), kvtuple[1]), sorted_common_substrings)
-  pretty_common_substrings_raw = map(lambda kvtuple: (bin2hex(kvtuple[0]), kvtuple[1]), sorted_common_substrings)
-  substring_lens = map(lambda kvtuple: len(kvtuple[0]), sorted_common_substrings)
-  substring_lens.sort(reverse=True)
   now = time.time()
-  print("[+] Sorting distinct substrings complete; time elapsed: %1.3f" % (now - start))
+  print("[+] Sorting %d substrings complete; time elapsed: %1.3f" % (len(sorted_common_substrings), now - start))
   start = now
+  pretty_common_substrings_raw = map(
+    lambda kvtuple: (bin2hex(kvtuple[0]), kvtuple[1]),
+    sorted_common_substrings
+  )
   if outfile is not None:
     assert outformat is not None, 'outformat should never be None'
-    f = open(outfile, 'w')
-    if outformat == 'json':
-      print("[+] Writing output to %s" % (outfile))
-      f.write("%s\n" % pretty_common_substrings_raw)
-    elif outformat == 'tsv':
-      for kvtuple in pretty_common_substrings_raw:
-        f.write("%s\t%s\n" % (kvtuple[0], kvtuple[1]))
-    else:
-      print("Unknown output format %s" % outformat)
-    f.close()
-  print("\tLength percentiles: %s" % (json.dumps(percentiles(lens, 15))))
-  print("\tDistinct ngram percentiles: %s" % (json.dumps(percentiles(count_distinct_ngrams, 15))))
-  #print("\tTop K ngrams: %s" % (json.dumps(prettyhist(topKHist(sorted_common_ngrams, 80)))))
-  print("\tShared ngram percentiles: %s" % (json.dumps(percentiles(pretty_common_ngrams, 15))))
-  print("\tShared ngram (>1) percentiles: %s" % (json.dumps(percentiles(pretty_duplicated_ngrams, 15))))
-  print("\tNum total distinct ngrams: %d" % (len(common_ngrams)))
-  print("\tNum total distinct ngrams (>1 occurance): %d" % (len(sorted_duplicated_common_ngrams)))
-  #print("\tSample of substrings: %s" % (json.dumps(prettyhist(common_substrings).items()[:30])))
-  print("\tShared substring percentiles: %s" % (json.dumps(percentiles(pretty_common_substrings, 15))))
-  print("\tSubstring length percentiles: %s" % (json.dumps(percentiles(substring_lens, 15))))
-  print("\tNum total distinct substrings: %d" % (len(substring_lens)))
+    with open(outfile, 'w') as f:
+      print("[+] Writing %d substrings and counts to %s" % (len(sorted_common_substrings), outfile))
+      if outformat == 'json':
+        f.write("%s\n" % pretty_common_substrings_raw)
+      elif outformat == 'tsv':
+        for kvtuple in pretty_common_substrings_raw:
+          f.write("%s\t%s\n" % (kvtuple[0], kvtuple[1]))
+      else:
+        print("Unknown output format %s" % outformat)
+  else:
+    # no stored output, so lets print some stuff to stdout
+    print("Count\tLength\tPreview")
+    # TODO allow for more than the top 10 common substrings?
+    for kvtuple in pretty_common_substrings_raw[:10]:
+      # note: divide length by 2 since it's hex..
+      # TODO allow for different preview lengths?
+      print("%d\t%d\t%s" % (kvtuple[1], len(kvtuple[0]) / 2, kvtuple[0][:30]))
+  return
 
 def validateInput(args):
   # input directory
@@ -219,14 +215,14 @@ def validateInput(args):
     output = args.output
   # output format
   if args.format is None:
-    output_format = 'json'
+    output_format = OUTPUT_FORMAT_DEFAULT
   elif args.format.lower() == 'json':
     output_format = 'json'
   elif args.format.lower() == 'tsv':
     output_format = 'tsv'
   else:
     print("[-] WARNING: Unknown output format %s, assuming json" % args.format)
-    output_format = 'json'
+    output_format = OUTPUT_FORMAT_DEFAULT
   # verbosity
   if args.verbose is None:
     verbosity = 0

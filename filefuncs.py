@@ -35,6 +35,8 @@ def multiFunc(tupleargs):
   func = tupleargs[1]
   args = tupleargs[2]
   filename_partitions = []
+  # TODO I don't think this partitioning is correct, we should assert
+  #  len(filenames) == sum(len(results_processed))
   partition_size = len(filenames) / NUM_CORES
   for i in range(NUM_CORES):
     filename_partitions.append([
