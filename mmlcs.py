@@ -7,6 +7,7 @@ from __future__ import print_function
 # stdlib imports
 import argparse
 import glob
+import hashlib
 import json
 import multiprocessing
 import os
@@ -16,11 +17,13 @@ import time
 
 # local imports
 from extractors import (ngrams, substrings)
+from extractors import (ngrams_set_generator, substrings_list)
 from filefuncs import (simpleFunc, multiFunc)
 from sorting import (mergeSort, multiMergeSort)
 
 DEBUG = False
 ENABLE_MULTICORE = True
+HASH_FUNC = 'md5'
 NUM_CORES = multiprocessing.cpu_count()
 NGRAMS_DEFAULT = 3
 OUTPUT_FORMAT_DEFAULT = 'tsv'
@@ -161,6 +164,95 @@ def main(path_regex, outfile, outformat, use_multi, N, verbosity):
       print("%d\t%d\t%s" % (kvtuple[1], len(kvtuple[0]) / 2, kvtuple[0][:30]))
   return
 
+def main2(path_regex, outfile, outformat, use_multi, N, verbosity, content_output):
+  start = time.time()
+  filenames = glob.glob(path_regex)
+  print("Running mmlcs on %d files using %d cores looking for %d-grams" % (
+    len(filenames),
+    NUM_CORES if use_multi else 1,
+    N
+  ))
+  # SELECT ngram, COUNT(DISTINCT file)
+  # GROUP BY ngram
+  if not use_multi:
+    (_, _, common_ngrams) = simpleFunc(
+      (filenames, ngrams_set_generator, [N])
+    )
+  else:
+    (_, _, common_ngrams) = multiFunc(
+      (filenames, ngrams_set_generator, [N])
+    )
+  now = time.time()
+  print("[+] Reading %d files complete; time elapsed: %1.3f" % (len(filenames), now - start))
+  start = now
+  # note that the following functions currently take a histogram and return
+  #  a sorted list of (ngram, count) tuples
+  # WHERE COUNT > 1
+  # ORDER BY COUNT DESC
+  if not use_multi or True:
+    # SLOW because common_ngrams gets huge
+    sorted_common_ngrams = sortedHist(common_ngrams, 1)
+  else:
+    # multi core sorting doesn't work yet...
+    sorted_common_ngrams = multiSortedHist(common_ngrams, 1)
+  now = time.time()
+  print("[+] Sorting %d ngrams complete; time elapsed: %1.3f" % (len(sorted_common_ngrams), now - start))
+  start = now
+  # RFC does top 25% make sense?
+  top_k_index = len(sorted_common_ngrams) / 4
+  # Map<hash, content>
+  substr_content = {}
+  # List<Tuple<file hash, substr hash, index>>
+  substr_indexes = []
+  if not use_multi or True:
+    for filename in filenames:
+      # TODO process batch at a time
+      blob = open(filename).read()
+      # TODO can we avoid using hex digest, and just use raw?
+      file_hash = hashlib.new(HASH_FUNC, blob).hexdigest()
+      # each substring will be unique because of the current impl
+      subs_inds = substrings_list(blob, N, dict(sorted_common_ngrams[:top_k_index]))
+      for tup in subs_inds:
+        sub_hash = hashlib.new(HASH_FUNC, tup[0]).hexdigest()
+        if sub_hash not in substr_content:
+          substr_content[sub_hash] = tup[0]
+        substr_indexes.append( (file_hash, sub_hash, tup[1]) )
+      # TODO len substr, entropy substr, .. aka metadata
+  else:
+    # TODO not yet implemented
+    pass
+  now = time.time()
+  print("[+] Extracting %d substrings complete; time elapsed: %1.3f" % (len(substr_content), now - start))
+  start = now
+  if content_output is not None:
+    print("[+] Writing %d substrings content to %s" % (len(substr_content), content_output))
+    for hash_key in substr_content:
+      filename = os.path.join(
+        content_output,
+        hash_key
+      )
+      if os.path.isfile(filename):
+        # TODO verify hash?
+        # hashlib.new('md5', open(hash).read()).hexdigest() == hash
+        continue
+      with open(filename, 'w') as f:
+        f.write(substr_content[hash_key])
+  if outfile is not None:
+    assert outformat is not None, 'outformat should never be None'
+    with open(outfile, 'w') as f:
+      print("[+] Writing %d substring occurances to %s" % (len(substr_indexes), outfile))
+      if outformat == 'json':
+        print('json tabular output not yet supported')
+      elif outformat == 'tsv':
+        # list<tuple<file hash, content hash, index>>
+        for tup in substr_indexes:
+          # Note that the hashes are hex
+          f.write("%s\t%s\t%d\n" % tup)
+      else:
+        print("Unknown output format %s" % outformat)
+  else:
+    print('No output file was specified')
+
 def validateInput(args):
   # input directory
   if args.input_dir is None:
@@ -168,7 +260,7 @@ def validateInput(args):
   elif not os.path.isdir(args.input_dir):
     raise Exception("%s is not a directory" % args.input_dir)
   else:
-    input_dir = "%s/*" % args.input_dir
+    input_dir = os.path.join(args.input_dir, '*')
   # output file
   if args.output is not None and not os.path.exists(args.output):
     output = args.output
@@ -200,7 +292,22 @@ def validateInput(args):
     N = NGRAMS_DEFAULT
   else:
     N = args.n
-  return (input_dir, output, output_format, args.multi, N, verbosity)
+  if args.content is not None:
+    if not os.path.isdir(args.content):
+      raise Exception("%s is not a directory" % args.input_dir)
+    content_output = args.content
+  else:
+    content_output = None
+  return (
+      input_dir,
+      output,
+      output_format,
+      args.multi,
+      N,
+      verbosity,
+      args.tabular,
+      content_output
+      )
 
 if __name__ == '__main__':
   # TODO argparse
@@ -223,9 +330,31 @@ if __name__ == '__main__':
     action='store_true',
     help='Toggles whether or not to use multiple cores'
   )
+  parser.add_argument(
+    '-t',
+    '--tabular',
+    action='store_true',
+    help='Extract tabular substrings'
+  )
+  parser.add_argument(
+    '-c',
+    '--content',
+    help='Where to store the content with filename=hex_hash'
+  )
   parser.add_argument('-n', help='The value of n for n-grams', type=int)
   parser.add_argument('-v', '--verbose', action='count')
-  (input_dir_regex, output, outformat, use_multi, n, verbosity) = validateInput(
+  (input_dir_regex,
+   output,
+   outformat,
+   use_multi,
+   n,
+   verbosity,
+   tabular,
+   content_output
+   ) = validateInput(
     parser.parse_args()
   )
-  main(input_dir_regex, output, outformat, use_multi, n, verbosity)
+  if not tabular:
+    main(input_dir_regex, output, outformat, use_multi, n, verbosity)
+  else:
+    main2(input_dir_regex, output, outformat, use_multi, n, verbosity, content_output)
