@@ -19,6 +19,7 @@ import time
 from extractors import (ngrams, substrings)
 from extractors import (ngrams_set_generator, substrings_list)
 from filefuncs import (simpleFunc, multiFunc)
+from filefuncs import (hashedFunc, hashedMultiFunc)
 from sorting import (mergeSort, multiMergeSort)
 
 DEBUG = False
@@ -117,14 +118,15 @@ def main(path_regex, outfile, outformat, use_multi, N, verbosity):
   start = now
   # RFC does top 25% make sense?
   top_k_index = len(sorted_common_ngrams) / 4
+  top_k = dict(sorted_common_ngrams[:top_k_index])
   if not use_multi:
     # RFC we're ignoring the count of distinct substrings
     (_, _, common_substrings) = simpleFunc(
-      (filenames, substrings, [N, dict(sorted_common_ngrams[:top_k_index])])
+      (filenames, substrings, [N, top_k])
     )
   else:
     (_, _, common_substrings) = multiFunc(
-      (filenames, substrings, [N, dict(sorted_common_ngrams[:top_k_index])])
+      (filenames, substrings, [N, top_k])
     )
   now = time.time()
   print("[+] Extracting %d substrings complete; time elapsed: %1.3f" % (len(common_substrings), now - start))
@@ -200,27 +202,15 @@ def main2(path_regex, outfile, outformat, use_multi, N, verbosity, content_outpu
   start = now
   # RFC does top 25% make sense?
   top_k_index = len(sorted_common_ngrams) / 4
-  # Map<hash, content>
-  substr_content = {}
-  # List<Tuple<file hash, substr hash, index>>
-  substr_indexes = []
-  if not use_multi or True:
-    for filename in filenames:
-      # TODO process batch at a time
-      blob = open(filename).read()
-      # TODO can we avoid using hex digest, and just use raw?
-      file_hash = hashlib.new(HASH_FUNC, blob).hexdigest()
-      # each substring will be unique because of the current impl
-      subs_inds = substrings_list(blob, N, dict(sorted_common_ngrams[:top_k_index]))
-      for tup in subs_inds:
-        sub_hash = hashlib.new(HASH_FUNC, tup[0]).hexdigest()
-        if sub_hash not in substr_content:
-          substr_content[sub_hash] = tup[0]
-        substr_indexes.append( (file_hash, sub_hash, tup[1]) )
-      # TODO len substr, entropy substr, .. aka metadata
+  top_k = dict(sorted_common_ngrams[:top_k_index])
+  if not use_multi:
+    (substr_content, substr_occurances) = hashedFunc(
+      (filenames, substrings_list, HASH_FUNC, [N, top_k])
+    )
   else:
-    # TODO not yet implemented
-    pass
+    (substr_content, substr_occurances) = hashedMultiFunc(
+      (filenames, substrings_list, HASH_FUNC, [N, top_k])
+    )
   now = time.time()
   print("[+] Extracting %d substrings complete; time elapsed: %1.3f" % (len(substr_content), now - start))
   start = now
@@ -240,12 +230,12 @@ def main2(path_regex, outfile, outformat, use_multi, N, verbosity, content_outpu
   if outfile is not None:
     assert outformat is not None, 'outformat should never be None'
     with open(outfile, 'w') as f:
-      print("[+] Writing %d substring occurances to %s" % (len(substr_indexes), outfile))
+      print("[+] Writing %d substring occurances to %s" % (len(substr_occurances), outfile))
       if outformat == 'json':
         print('json tabular output not yet supported')
       elif outformat == 'tsv':
         # list<tuple<file hash, content hash, index>>
-        for tup in substr_indexes:
+        for tup in substr_occurances:
           # Note that the hashes are hex
           f.write("%s\t%s\t%d\n" % tup)
       else:
@@ -270,7 +260,7 @@ def validateInput(args):
     output = None
   else:
     # TODO verify output file is writable
-    print("[-] WARNING: Don't know what to do with %s, #doitlive" % args.output)
+    print("[-] WARNING: Don't know what to do with %s... #f*%kit #doitlive" % args.output)
     output = args.output
   # output format
   if args.format is None:
@@ -293,6 +283,8 @@ def validateInput(args):
   else:
     N = args.n
   if args.content is not None:
+    if not args.tabular:
+      print('You specified a content output dir, but not running in tabular mode')
     if not os.path.isdir(args.content):
       raise Exception("%s is not a directory" % args.input_dir)
     content_output = args.content

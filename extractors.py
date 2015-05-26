@@ -75,6 +75,12 @@ def substrings_list(data, n, hist):
   subs = []
   seen = set()
   i = 0
+  # TODO math.log(len(hist))
+  min_file_count = 10
+  # RFC does max substring make sense?
+  # max_file_count makes sense when <10% samples cluster
+  # TODO this probably depends on expected results
+  min_substring_len = 8
   while i < len(data) - n + 1:
     gram = data[i : i + n]
     if gram in hist:
@@ -85,12 +91,13 @@ def substrings_list(data, n, hist):
         jgram = data[j : j + n]
         # RFC how should we handle changes in the hist value, aka count for
         #  that ngram? increases are interesting, decreases are unhelpful(?)
-        if jgram in hist and hist[jgram] == count:
+        #if jgram in hist and hist[jgram] == count:
+        # Or does a dynamic threshhold make more sense?
+        if jgram in hist and hist[jgram] > min_file_count:
           end += 1
         else:
           break
-      # TODO use a constant instead of 4?
-      if end - i >= 4:
+      if end - i > min_substring_len:
         sub = data[i : end]
         if sub not in seen:
           # TODO hash the sub here?
