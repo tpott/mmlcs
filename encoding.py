@@ -2,6 +2,8 @@
 # Trevor Pottinger
 # Mon May 25 22:40:37 PDT 2015
 
+import struct
+
 def bin2hex(s):
   return ''.join( ("%02x" % ord(c) for c in s) )
 

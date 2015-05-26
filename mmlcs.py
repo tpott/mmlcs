@@ -11,7 +11,6 @@ import hashlib
 import json
 import multiprocessing
 import os
-import struct
 import sys
 import time
 
