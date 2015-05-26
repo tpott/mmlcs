@@ -16,6 +16,7 @@ import sys
 import time
 
 # local imports
+from encoding import (bin2hex)
 from extractors import (ngrams, substrings)
 from extractors import (ngrams_set_generator, substrings_list)
 from filefuncs import (simpleFunc, multiFunc)
@@ -74,16 +75,6 @@ def multiSortedHist(hist, minT=0):
     tuples = filter(lambda kvtuple: kvtuple[1] > minT, tuples)
   # True implies reverse=True, aka DESCENDING
   return multiMergeSort(tuples, __hist_cmp, True)
-
-def bin2hex(s):
-  return ''.join( ("%02x" % ord(c) for c in s) )
-
-def hex2bin(s):
-  binstr = ''
-  for i in range(0, len(s), 2):
-    # don't use += to be explicit about ordering
-    binstr = binstr + struct.pack('B', int(s[i:i+2], 16))
-  return binstr
 
 def main(path_regex, outfile, outformat, use_multi, N, verbosity):
   start = time.time()
