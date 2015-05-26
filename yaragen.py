@@ -97,6 +97,7 @@ if __name__ == '__main__':
     else:
       substr_hashes[row['substr_hash']] = 1
   substr_hash_list = substr_hashes.items()
+  # this could be slow if theres 1M+ items in the db
   substr_hash_list.sort(__hist_cmp, reverse=True)
   # generate output
   i = 0
@@ -108,15 +109,16 @@ if __name__ == '__main__':
     substr_content_filename = os.path.join(args.content, kv[0])
     # TODO should we verify the hash?
     substr_content = open(substr_content_filename).read()
-    if args.gen:
-      identifier = chr(CHAR_OFFSET + i)
-      str_conditions.append(STRING_TEMPLATE % {
-        'identifier' : identifier,
-        'hex_content' : bin2hex(substr_content),
-      })
-      i += 1
-    else:
+    if not args.gen:
       print("%s\t%d\t%d" % (kv[0], kv[1], len(substr_content)))
+      continue
+    # TODO limit the number of substrs
+    identifier = chr(CHAR_OFFSET + i)
+    str_conditions.append(STRING_TEMPLATE % {
+      'identifier' : identifier,
+      'hex_content' : bin2hex(substr_content),
+    })
+    i += 1
   if args.gen:
     print(RULE_TEMPLATE % {
       'ds' : datetime.datetime.now().strftime('%Y-%m-%d'),
