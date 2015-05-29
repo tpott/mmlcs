@@ -29,7 +29,7 @@ def substrings(data, n, hist):
     gram = data[i : i + n]
     if gram in hist:
       # select longest substring in hist
-      end = i + 1
+      end = i + n
       count = hist[gram]
       for j in xrange(i + 1, len(data) - n + 1):
         jgram = data[j : j + n]
