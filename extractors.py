@@ -61,10 +61,11 @@ def ngrams_set_generator(data, n):
     if gram in seen:
       continue
     else:
+      # TODO this is not a generator, yield `gram` here
       seen.add(gram)
   return seen
 
-def substrings_list(data, n, hist):
+def substrings_list(data, n, hist, require_equal_counts=True):
   """Assumes hist is a bunch of ngrams. It could be a set or a dict (as long as
   it supports the `in` syntax for membership testing. Although the current
   implementation requires a dict so counts can be constant over a substr.
@@ -83,30 +84,34 @@ def substrings_list(data, n, hist):
   min_substring_len = 8
   while i < len(data) - n + 1:
     gram = data[i : i + n]
-    if gram in hist:
-      # select longest substring in hist
-      end = i + 1
-      count = hist[gram]
-      for j in xrange(i + 1, len(data) - n + 1):
-        jgram = data[j : j + n]
-        # RFC how should we handle changes in the hist value, aka count for
-        #  that ngram? increases are interesting, decreases are unhelpful(?)
-        #if jgram in hist and hist[jgram] == count:
-        # Or does a dynamic threshhold make more sense?
-        if jgram in hist and hist[jgram] > min_file_count:
-          end += 1
-        else:
-          break
-      if end - i > min_substring_len:
-        sub = data[i : end]
-        if sub not in seen:
-          # TODO hash the sub here?
-          subs.append( (sub, i) )
-          seen.add(sub)
-        else:
-          # RFC should we include multiple occurances?
-          pass
-        i = end
+    if gram not in hist or hist[gram] <= min_file_count:
+      i += 1  # ugh now we increment i in two places.. for loops would fix this
+      continue
+    # select longest substring in hist
+    end = i + n
+    count = hist[gram]
+    for j in xrange(i + 1, len(data) - n + 1):
+      jgram = data[j : j + n]
+      # RFC how should we handle changes in the hist value, aka count for
+      #  that ngram? increases are interesting, decreases are unhelpful(?)
+      #if jgram in hist and hist[jgram] == count:
+      # Or does a dynamic threshhold make more sense?
+      if jgram in hist and \
+          ((not require_equal_counts and hist[jgram] > min_file_count) or \
+           (require_equal_counts and hist[jgram] == count)):
+        end += 1
+      else:
+        break
+    if end - i > min_substring_len:
+      sub = data[i : end]
+      if sub not in seen:
+        # TODO hash the sub here?
+        subs.append( (sub, i) )
+        seen.add(sub)
+      else:
+        # RFC should we include multiple occurances?
+        pass
+      i = end
     # if only python had real for loops and that bug wouldn't have happened..
     i += 1
   return subs

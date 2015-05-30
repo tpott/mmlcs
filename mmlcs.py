@@ -250,7 +250,7 @@ def validateInput(args):
     output = None
   else:
     # TODO verify output file is writable
-    print("[-] WARNING: Don't know what to do with %s... #f*%kit #doitlive" % args.output)
+    print("[-] WARNING: Don't know what to do with %s... #f*$kit #doitlive" % args.output)
     output = args.output
   # output format
   if args.format is None:
