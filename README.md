@@ -28,3 +28,8 @@ Essentially a table between hash and content. The second being a hash based
 mapping between sample hashes, substring hashes, and starting index for that
 substring. A stretch would to have a table between hash and metadata, such
 as content length and maybe other hash types of the same content.
+
+# Usage
+
+`python mmlcs.py /input_dir/ -m -n 3 -t -o tmp_hex_db -c substr_content_dir`
+`cut -f2 tmp_hex_db | sort | uniq -c | sort -nr | python histogram.py -n40`
