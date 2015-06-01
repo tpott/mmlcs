@@ -5,7 +5,8 @@
 def ngrams(data, n):
   "Expects a bytestring and returns a histogram of ngrams"
   assert n >= 0, 'n must be greater than zero: %d' % n
-  assert n < len(data), 'n must be less than len(data): %d > %d' % (n, len(data))
+  if n > len(data):
+    return {}
   hist = {}
   for i in xrange(len(data) - n + 1):
     # python slicing is the best
@@ -21,8 +22,9 @@ def substrings(data, n, hist):
   it supports the `in` syntax for membership testing. Although the current
   implementation requires a dict so counts can be constant over a substr"""
   assert n >= 0, 'n must be greater than zero: %d' % n
-  assert n < len(data), 'n must be less than len(data): %d > %d' % (n, len(data))
   assert len(hist) > 0, 'hist must be non-empty'
+  if n > len(data):
+    return {}
   subs = {}
   i = 0
   while i < len(data) - n + 1:
@@ -53,7 +55,8 @@ def substrings(data, n, hist):
 
 def ngrams_set_generator(data, n):
   assert n >= 0, 'n must be greater than zero: %d' % n
-  assert n < len(data), 'n must be less than len(data): %d > %d' % (n, len(data))
+  if n > len(data):
+    return set()
   seen = set()
   for i in xrange(len(data) - n + 1):
     # python slicing is the best
@@ -71,8 +74,9 @@ def substrings_list(data, n, hist, require_equal_counts=True):
   implementation requires a dict so counts can be constant over a substr.
   Returns a list of (substring, index)."""
   assert n >= 0, 'n must be greater than zero: %d' % n
-  assert n < len(data), 'n must be less than len(data): %d > %d' % (n, len(data))
   assert len(hist) > 0, 'hist must be non-empty'
+  if n > len(data):
+    return []
   subs = []
   seen = set()
   i = 0

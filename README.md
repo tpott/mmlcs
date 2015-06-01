@@ -33,3 +33,4 @@ as content length and maybe other hash types of the same content.
 
 `python mmlcs.py /input_dir/ -m -n 3 -t -o tmp_hex_db -c substr_content_dir`
 `cut -f2 tmp_hex_db | sort | uniq -c | sort -nr | python histogram.py -n40`
+`python yaragen.py -k 20 tmp_hex_db --gen -c substr_content_dir`
