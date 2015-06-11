@@ -11,6 +11,7 @@ from __future__ import print_function
 import argparse
 import json
 import multiprocessing
+import random
 import time
 
 # TODO mergeSort isn't really mergeSort
@@ -34,7 +35,7 @@ def sortedHist(hist, minT=0):
   # True implies reverse=True, aka DESCENDING
   return mergeSort(tuples, __hist_cmp, True)
 
-def main(input_db, tabular):
+def main(input_db, tabular, sampling_rate):
   num_lines_read = 0
   file_to_substr = {}
   substr_to_file = {}
@@ -65,9 +66,13 @@ def main(input_db, tabular):
   for file_hash in file_to_substr:
     substr_list = list(file_to_substr[file_hash])
     substr_list.sort()
-    # this is the really expensive loop
-    for i in range(len(substr_list)):
-      for j in range(i+1, len(substr_list)):
+    if sampling_rate != 0:
+      n_samples = int(float(len(substr_list)) / sampling_rate)
+      for k in range(n_samples):
+        i, j = None, None
+        while i is None or i == j:
+          i = random.randint(0, len(substr_list) - 1)
+          j = random.randint(0, len(substr_list) - 1)
         # sorting co-occurrence since order doesn't matter
         if substr_list[i] < substr_list[j]:
           pair = (substr_list[i], substr_list[j])
@@ -77,6 +82,19 @@ def main(input_db, tabular):
           cooccurrences[pair].add(file_hash)
         else:
           cooccurrences[pair] = set([file_hash])
+    else:
+      # this is the really expensive loop
+      for i in range(len(substr_list)):
+        for j in range(i+1, len(substr_list)):
+          # sorting co-occurrence since order doesn't matter
+          if substr_list[i] < substr_list[j]:
+            pair = (substr_list[i], substr_list[j])
+          else:
+            pair = (substr_list[j], substr_list[i])
+          if pair in cooccurrences:
+            cooccurrences[pair].add(file_hash)
+          else:
+            cooccurrences[pair] = set([file_hash])
   now = time.time()
   print("[+] Reading %d co-occurrences; time elapsed: %1.3f" % (len(cooccurrences), now - start))
   start = now
@@ -84,7 +102,11 @@ def main(input_db, tabular):
   for cooccur in cooccurrences:
     cooccurrence_counts[cooccur] = len(cooccurrences[cooccur])
   # TODO dont use a constant
-  cooccur_sorted_hist = sortedHist(cooccurrence_counts, 30)
+  # TODO really dont use a constant
+  if sampling_rate == 0:
+    cooccur_sorted_hist = sortedHist(cooccurrence_counts, 30)
+  else:
+    cooccur_sorted_hist = sortedHist(cooccurrence_counts, 1)
   now = time.time()
   print("[+] Done sorting %d co-occurrences; time elapsed: %1.3f" % (len(cooccur_sorted_hist), now - start))
   start = now
@@ -110,7 +132,12 @@ if __name__ == '__main__':
     '-t',
     '--tabular',
     action='store_true'
-    #help='How the output should be formated. TSV or JSON'
+  )
+  parser.add_argument(
+    '-s',
+    '--samplingrate',
+    type=int
   )
   args = parser.parse_args()
-  main(args.input_db, args.tabular)
+  sampling_rate = args.samplingrate if args.samplingrate is not None else 0
+  main(args.input_db, args.tabular, sampling_rate)
