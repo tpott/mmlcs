@@ -35,11 +35,10 @@ def sortedHist(hist, minT=0):
   # True implies reverse=True, aka DESCENDING
   return mergeSort(tuples, __hist_cmp, True)
 
-def main(input_db, tabular, sampling_rate):
+def readFile(input_db):
   num_lines_read = 0
   file_to_substr = {}
   substr_to_file = {}
-  start = time.time()
   with open(input_db) as f:
     for l in f:
       # TODO how can wer verify the input format?
@@ -54,25 +53,16 @@ def main(input_db, tabular, sampling_rate):
       else:
         substr_to_file[substr_hash] = set([file_hash])
       num_lines_read += 1
-  now = time.time()
-  print("[+] Reading %d lines, %d file hashes, and %d substr hashes complete; time elapsed: %1.3f" % (
-    num_lines_read,
-    len(file_to_substr),
-    len(substr_to_file),
-    now - start
-  ))
-  start = now
+    return (num_lines_read, file_to_substr, substr_to_file)
+
+def bruteForceCooccurr(file_to_substr, substr_to_file):
   cooccurrences = {}
   for file_hash in file_to_substr:
     substr_list = list(file_to_substr[file_hash])
     substr_list.sort()
-    if sampling_rate != 0:
-      n_samples = int(float(len(substr_list)) / sampling_rate)
-      for k in range(n_samples):
-        i, j = None, None
-        while i is None or i == j:
-          i = random.randint(0, len(substr_list) - 1)
-          j = random.randint(0, len(substr_list) - 1)
+    # this is the really expensive loop
+    for i in range(len(substr_list)):
+      for j in range(i+1, len(substr_list)):
         # sorting co-occurrence since order doesn't matter
         if substr_list[i] < substr_list[j]:
           pair = (substr_list[i], substr_list[j])
@@ -82,19 +72,48 @@ def main(input_db, tabular, sampling_rate):
           cooccurrences[pair].add(file_hash)
         else:
           cooccurrences[pair] = set([file_hash])
-    else:
-      # this is the really expensive loop
-      for i in range(len(substr_list)):
-        for j in range(i+1, len(substr_list)):
-          # sorting co-occurrence since order doesn't matter
-          if substr_list[i] < substr_list[j]:
-            pair = (substr_list[i], substr_list[j])
-          else:
-            pair = (substr_list[j], substr_list[i])
-          if pair in cooccurrences:
-            cooccurrences[pair].add(file_hash)
-          else:
-            cooccurrences[pair] = set([file_hash])
+  return cooccurrences
+
+def sampledCooccurr(file_to_substr, substr_to_file, sampling_rate):
+  cooccurrences = {}
+  for file_hash in file_to_substr:
+    substr_list = list(file_to_substr[file_hash])
+    substr_list.sort()
+    n_samples = int(float(len(substr_list)) / sampling_rate)
+    for k in range(n_samples):
+      i, j = None, None
+      while i is None or i == j:
+        i = random.randint(0, len(substr_list) - 1)
+        j = random.randint(0, len(substr_list) - 1)
+      # sorting co-occurrence since order doesn't matter
+      if substr_list[i] < substr_list[j]:
+        pair = (substr_list[i], substr_list[j])
+      else:
+        pair = (substr_list[j], substr_list[i])
+      if pair in cooccurrences:
+        cooccurrences[pair].add(file_hash)
+      else:
+        cooccurrences[pair] = set([file_hash])
+  return cooccurrences
+
+def genericCooccurr(file_to_substr, substr_to_file, sampling_rate):
+  if sampling_rate != 0:
+    return sampledCooccurr(file_to_substr, substr_to_file, sampling_rate)
+  else:
+    return bruteForceCooccurr(file_to_substr, substr_to_file)
+
+def main(input_db, tabular, sampling_rate):
+  start = time.time()
+  (num_lines_read, file_to_substr, substr_to_file) = readFile(input_db)
+  now = time.time()
+  print("[+] Reading %d lines, %d file hashes, and %d substr hashes complete; time elapsed: %1.3f" % (
+    num_lines_read,
+    len(file_to_substr),
+    len(substr_to_file),
+    now - start
+  ))
+  start = now
+  cooccurrences = genericCooccurr(file_to_substr, substr_to_file, sampling_rate)
   now = time.time()
   print("[+] Reading %d co-occurrences; time elapsed: %1.3f" % (len(cooccurrences), now - start))
   start = now
