@@ -12,6 +12,7 @@ import argparse
 import json
 import multiprocessing
 import random
+import sys
 import time
 
 # TODO mergeSort isn't really mergeSort
@@ -74,6 +75,27 @@ def bruteForceCooccurr(file_to_substr, substr_to_file):
           cooccurrences[pair] = set([file_hash])
   return cooccurrences
 
+def topKCooccurr(file_to_substr, substr_to_file, topKSubstrs):
+  topKSet = set(map(lambda item: item[0], topKSubstrs))
+  cooccurrences = {}
+  for file_hash in file_to_substr:
+    substr_list = list(file_to_substr[file_hash])
+    substr_list.sort()
+    substr_list = filter(lambda substr: substr in topKSet, substr_list)
+    # this is the really expensive loop
+    for i in range(len(substr_list)):
+      for j in range(i+1, len(substr_list)):
+        # sorting co-occurrence since order doesn't matter
+        if substr_list[i] < substr_list[j]:
+          pair = (substr_list[i], substr_list[j])
+        else:
+          pair = (substr_list[j], substr_list[i])
+        if pair in cooccurrences:
+          cooccurrences[pair].add(file_hash)
+        else:
+          cooccurrences[pair] = set([file_hash])
+  return cooccurrences
+
 def sampledCooccurr(file_to_substr, substr_to_file, sampling_rate):
   cooccurrences = {}
   for file_hash in file_to_substr:
@@ -96,13 +118,15 @@ def sampledCooccurr(file_to_substr, substr_to_file, sampling_rate):
         cooccurrences[pair] = set([file_hash])
   return cooccurrences
 
-def genericCooccurr(file_to_substr, substr_to_file, sampling_rate):
+def genericCooccurr(file_to_substr, substr_to_file, sampling_rate, top_k, topKSubstrs):
   if sampling_rate != 0:
     return sampledCooccurr(file_to_substr, substr_to_file, sampling_rate)
+  elif top_k != 0:
+    return topKCooccurr(file_to_substr, substr_to_file, topKSubstrs)
   else:
     return bruteForceCooccurr(file_to_substr, substr_to_file)
 
-def main(input_db, tabular, sampling_rate):
+def main(input_db, tabular, sampling_rate, top_k):
   start = time.time()
   (num_lines_read, file_to_substr, substr_to_file) = readFile(input_db)
   now = time.time()
@@ -111,31 +135,33 @@ def main(input_db, tabular, sampling_rate):
     len(file_to_substr),
     len(substr_to_file),
     now - start
-  ))
+  ), file=sys.stderr)
   start = now
   substrCounts = {}
   for substr in substr_to_file:
     substrCounts[substr] = len(substr_to_file[substr])
-  topKSubstrs = sortedHist(substrCounts, 1)
+  topKSubstrs = sortedHist(substrCounts, 1)[:top_k]
   now = time.time()
-  print("[+] Done sorting %d substr occurrences; time elapsed: %1.3f" % (len(topKSubstrs), now - start))
+  print("[+] Done sorting %d substr occurrences; time elapsed: %1.3f" % (len(topKSubstrs), now - start), file=sys.stderr)
   start = now
   # TODO use "indexed" substr occurrences
-  cooccurrences = genericCooccurr(file_to_substr, substr_to_file, sampling_rate)
+  cooccurrences = genericCooccurr(file_to_substr, substr_to_file, sampling_rate, top_k, topKSubstrs)
   now = time.time()
-  print("[+] Reading %d co-occurrences; time elapsed: %1.3f" % (len(cooccurrences), now - start))
+  print("[+] Reading %d co-occurrences; time elapsed: %1.3f" % (len(cooccurrences), now - start), file=sys.stderr)
   start = now
   cooccurrence_counts = {}
   for cooccur in cooccurrences:
     cooccurrence_counts[cooccur] = len(cooccurrences[cooccur])
   # TODO dont use a constant
   # TODO really dont use a constant
-  if sampling_rate == 0:
-    cooccur_sorted_hist = sortedHist(cooccurrence_counts, 30)
-  else:
+  if sampling_rate != 0:
     cooccur_sorted_hist = sortedHist(cooccurrence_counts, 1)
+  elif top_k != 0:
+    cooccur_sorted_hist = sortedHist(cooccurrence_counts, 1)
+  else:
+    cooccur_sorted_hist = sortedHist(cooccurrence_counts, 10)
   now = time.time()
-  print("[+] Done sorting %d co-occurrences; time elapsed: %1.3f" % (len(cooccur_sorted_hist), now - start))
+  print("[+] Done sorting %d co-occurrences; time elapsed: %1.3f" % (len(cooccur_sorted_hist), now - start), file=sys.stderr)
   start = now
   if not tabular:
     print(json.dumps(cooccur_sorted_hist[:20]))
@@ -165,6 +191,15 @@ if __name__ == '__main__':
     '--samplingrate',
     type=int
   )
+  parser.add_argument(
+    '-k',
+    '--topk',
+    type=int
+  )
   args = parser.parse_args()
   sampling_rate = args.samplingrate if args.samplingrate is not None else 0
-  main(args.input_db, args.tabular, sampling_rate)
+  top_k = args.topk if args.topk is not None else 0
+  if sampling_rate != 0 and top_k != 0:
+    print("Cant have both sampling_rate (%d) and top k (%d)" % (sampling_rate, top_k), file=sys.stderr)
+    sys.exit(-1)
+  main(args.input_db, args.tabular, sampling_rate, top_k)
