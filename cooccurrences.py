@@ -113,6 +113,14 @@ def main(input_db, tabular, sampling_rate):
     now - start
   ))
   start = now
+  substrCounts = {}
+  for substr in substr_to_file:
+    substrCounts[substr] = len(substr_to_file[substr])
+  topKSubstrs = sortedHist(substrCounts, 1)
+  now = time.time()
+  print("[+] Done sorting %d substr occurrences; time elapsed: %1.3f" % (len(topKSubstrs), now - start))
+  start = now
+  # TODO use "indexed" substr occurrences
   cooccurrences = genericCooccurr(file_to_substr, substr_to_file, sampling_rate)
   now = time.time()
   print("[+] Reading %d co-occurrences; time elapsed: %1.3f" % (len(cooccurrences), now - start))
