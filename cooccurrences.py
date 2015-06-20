@@ -121,7 +121,7 @@ def sampledCooccurr(file_to_substr, substr_to_file, sampling_rate):
 def genericCooccurr(file_to_substr, substr_to_file, sampling_rate, top_k, topKSubstrs):
   if sampling_rate != 0:
     return sampledCooccurr(file_to_substr, substr_to_file, sampling_rate)
-  elif top_k != 0:
+  elif top_k != 0 and topKSubstrs is not None:
     return topKCooccurr(file_to_substr, substr_to_file, topKSubstrs)
   else:
     return bruteForceCooccurr(file_to_substr, substr_to_file)
@@ -137,13 +137,16 @@ def main(input_db, tabular, sampling_rate, top_k):
     now - start
   ), file=sys.stderr)
   start = now
-  substrCounts = {}
-  for substr in substr_to_file:
-    substrCounts[substr] = len(substr_to_file[substr])
-  topKSubstrs = sortedHist(substrCounts, 1)[:top_k]
-  now = time.time()
-  print("[+] Done sorting %d substr occurrences; time elapsed: %1.3f" % (len(topKSubstrs), now - start), file=sys.stderr)
-  start = now
+  if top_k != 0:
+    substrCounts = {}
+    for substr in substr_to_file:
+      substrCounts[substr] = len(substr_to_file[substr])
+    topKSubstrs = sortedHist(substrCounts, 1)[:top_k]
+    now = time.time()
+    print("[+] Done sorting %d substr occurrences; time elapsed: %1.3f" % (len(topKSubstrs), now - start), file=sys.stderr)
+  else:
+    topKSubstrs = None
+    start = now
   # TODO use "indexed" substr occurrences
   cooccurrences = genericCooccurr(file_to_substr, substr_to_file, sampling_rate, top_k, topKSubstrs)
   now = time.time()
